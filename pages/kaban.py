@@ -13,6 +13,7 @@ st.set_page_config(
     page_title="Kanban Board",
     page_icon="🐱",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 # ----------------------------------------------------------------------
@@ -52,6 +53,12 @@ st.markdown(
         html, body, [class*="css"]  {
             font-family: 'Poppins', sans-serif;
         }
+
+        #MainMenu, footer, header {visibility: hidden;}
+
+        /* Permanently hide the sidebar and its collapse/expand arrow */
+        [data-testid="stSidebar"] {display: none;}
+        [data-testid="collapsedControl"] {display: none;}
 
         .stApp {
             background: linear-gradient(180deg, #fdf6f0 0%, #f7f2fb 100%);
