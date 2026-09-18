@@ -1,356 +1,353 @@
-import streamlit as st
-from pymongo import MongoClient
-from datetime import datetime
-import os
-from pathlib import Path
-from io import BytesIO
-import pandas as pd
+"""
+IBPS Countdown & Welcome Dashboard (standalone, no database)
+-----------------------------------------------------------------
+Shows:
+  1. "Good morning, mam" + today's date
+  2. Quick navigation buttons to Focus Timer and Task Board
+  3. Days left until upcoming Institute of Banking Personnel Selection (IBPS) exams
+  4. A welcome/motivational message that auto-cycles every few hours
 
-# ----------------------------------------------------------------------
-# PAGE CONFIG
-# ----------------------------------------------------------------------
+Dates sourced from the official IBPS Calendar 2026-27 (ibps.in). IBPS marks its
+calendar "tentative" and can revise dates before the official notification —
+double-check against ibps.in closer to each exam.
+
+Run:
+    pip install streamlit
+    streamlit run app.py
+"""
+
+from datetime import datetime, date
+import streamlit as st
+
+# ---------------------------------------------------------------------------
+# Data
+# ---------------------------------------------------------------------------
+
+CYCLE_SECONDS = 7200  # how often the welcome message rotates (2 hours)
+
+WELCOME_MESSAGES = [
+    "Good morning! Every day of prep brings you closer to your goal.",
+    "Rise and shine — today is another step toward IBPS success!",
+    "Consistency beats intensity. Small daily effort wins the exam.",
+    "You've got this, mam! One more focused day, one step closer.",
+    "Discipline today, results tomorrow. Let's go!",
+    "Believe in the work you put in — it always shows up on exam day.",
+    "One topic at a time. One mock test at a time. You're getting there.",
+    "Good morning, mam! A fresh day, a fresh chance to get closer to your IBPS dream.",
+    "Wake up with determination — every question you solve is a step toward success.",
+    "Your hard work today is building the confidence you'll carry into the exam hall.",
+    "Keep going, mam! Progress may feel slow, but every focused hour counts.",
+    "Today's preparation is tomorrow's achievement. Stay consistent and keep believing.",
+    "One more day of dedication, one more step toward your banking career.",
+    "Don't wait for motivation — build your success with discipline, one day at a time.",
+    "Good morning, mam! Trust your preparation, stay focused, and make today count.",
+    "Every mock, every revision, every effort brings you closer to that IBPS selection.",
+    "Your dream is worth the effort. Keep studying, keep improving, and keep moving forward!",
+    "Good morning, mam! Your dream job is waiting for the hard work you put in today.",
+    "Rise and shine, mam! Every chapter completed is another victory on your journey to IBPS success.",
+    "Start your day with confidence — you are capable of achieving great things.",
+    "Small steps every day, mam. Big results are built through consistent preparation.",
+    "Your dedication today will become your confidence on exam day. Keep going!",
+    "Good morning! Focus on progress, not perfection. You've got this, mam!",
+    "Every question you practice is making you stronger and more prepared for IBPS.",
+    "Believe in yourself, mam! Your efforts are creating the future you dream of.",
+    "Another beautiful day to learn, revise, and move one step closer to your goal.",
+    "Stay patient, stay disciplined, and trust the process. Success takes time.",
+    "Good morning, mam! Let your determination be stronger than any challenge today.",
+    "One focused study session can make a big difference. Start today with purpose!",
+    "Your consistency is your superpower, mam. Keep showing up and keep improving.",
+    "Every sunrise is a reminder that you have another chance to make your dreams happen.",
+    "Don't count the hours, make the hours count. Your IBPS journey is worth it!",
+    "Good morning! Stay calm, study smart, and let your hard work speak for itself.",
+    "Today's revision is tomorrow's confidence. Keep building your success, mam!",
+    "Your goal is closer than it was yesterday. Keep working and keep believing.",
+    "Challenges are part of the journey, but your determination can take you through them.",
+    "Good morning, mam! Stay focused, stay positive, and make today another step toward IBPS success.",
+]
+
+# Source: IBPS Calendar 2026-27, released 16 Jan 2026 (official: ibps.in)
+EXAM_DATES = {
+    "IBPS Clerk Prelims": {"date": datetime(2026, 10, 10), "official": True},
+    "IBPS RRB PO Prelims": {"date": datetime(2026, 11, 21), "official": True},
+    "IBPS Clerk Mains": {"date": datetime(2026, 12, 27), "official": True},
+}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def days_left(target: datetime) -> int:
+    return (target.date() - date.today()).days
+
+
+def render_autorefresh(seconds: int):
+    st.markdown(f"<meta http-equiv='refresh' content='{seconds}'>", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Page setup
+# ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Kanban Board",
-    page_icon="🐱",
-    layout="wide",
+    page_title="IBPS Countdown",
+    page_icon="🌸",
+    layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-# ----------------------------------------------------------------------
-# MONGODB CONNECTION
-# ----------------------------------------------------------------------
-MONGO_URI = os.environ.get(
-    "MONGO_URI",
-    "mongodb+srv://soumyadeepdas2511:dxRsCQDq7YQSc1vh"
-    "@cluster0.zmm4k.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
-)
+render_autorefresh(CYCLE_SECONDS)
 
-DB_NAME = "kanban_todo_db"
-COLLECTION_NAME = "tasks"
-
-
-@st.cache_resource
-def get_collection():
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-    return db[COLLECTION_NAME]
-
-
-tasks_col = get_collection()
-
-STATUSES = ["Will Do", "Doing", "Done"]
-NEXT_STATUS = {"Will Do": "Doing", "Doing": "Done"}
-PREV_STATUS = {"Doing": "Will Do", "Done": "Doing"}
-
-# ----------------------------------------------------------------------
-# STYLING
-# ----------------------------------------------------------------------
 st.markdown(
     """
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Quicksand:wght@500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Nunito:wght@400;600;700&display=swap');
 
-        html, body, [class*="css"]  {
-            font-family: 'Poppins', sans-serif;
-        }
+    html, body, [class*="css"] {
+        font-family: 'Nunito', sans-serif;
+    }
 
-        #MainMenu, footer, header {visibility: hidden;}
+    .stApp {
+        background: linear-gradient(160deg, #fdf6f0 0%, #f6f2fb 45%, #f0f7f5 100%);
+    }
 
-        /* Permanently hide the sidebar and its collapse/expand arrow */
-        [data-testid="stSidebar"] {display: none;}
-        [data-testid="collapsedControl"] {display: none;}
+    #MainMenu, footer, header {visibility: hidden;}
 
-        .stApp {
-            background: linear-gradient(180deg, #fdf6f0 0%, #f7f2fb 100%);
-        }
+    /* Permanently hide the sidebar and its collapse/expand arrow */
+    [data-testid="stSidebar"] {display: none;}
+    [data-testid="collapsedControl"] {display: none;}
 
-        .kanban-hero {
-            background: linear-gradient(120deg, #b9c9f4 0%, #d9c7ef 35%, #f3c9dd 70%, #294b8f 100%);
-            border-radius: 22px;
-            padding: 38px 34px 30px 34px;
-            margin-bottom: 26px;
-            position: relative;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(80, 60, 120, 0.18);
-        }
-        .kanban-hero::before {
-            content: "✦";
-            position: absolute;
-            top: 18px; right: 60px;
-            font-size: 22px;
-            color: #ffd166;
-            opacity: 0.9;
-        }
-        .kanban-hero::after {
-            content: "✧";
-            position: absolute;
-            bottom: 24px; left: 80px;
-            font-size: 18px;
-            color: #fff;
-            opacity: 0.8;
-        }
-        .kanban-hero h1 {
-            color: #3a2e52;
-            font-family: 'Quicksand', sans-serif;
-            font-weight: 700;
-            font-size: 2.1rem;
-            margin: 0 0 6px 0;
-        }
-        .kanban-hero p {
-            color: #4a3f66;
-            font-size: 0.95rem;
-            margin: 0;
-            opacity: 0.85;
-        }
-        .kanban-cat {
-            font-size: 2.4rem;
-        }
+    .block-container {
+        padding-top: 3rem;
+        padding-bottom: 3rem;
+        max-width: 720px;
+    }
 
-        .quote-banner {
-            background: #fdeaf1;
-            border-left: 4px solid #e79cc2;
-            padding: 10px 16px;
-            border-radius: 8px;
-            font-size: 0.92rem;
-            color: #7a4a63;
-            margin-bottom: 22px;
-        }
+    /* ---------- Greeting ---------- */
+    .hero {
+        text-align: center;
+        margin-bottom: 1.2rem;
+    }
+    .hero .emoji {
+        font-size: 2.2rem;
+        margin-bottom: 0.2rem;
+    }
+    .hero .greeting {
+        font-family: 'Quicksand', sans-serif;
+        font-size: 2.1rem;
+        font-weight: 700;
+        color: #4a4266;
+        margin: 0;
+        letter-spacing: 0.2px;
+    }
+    .hero .today {
+        font-size: 1rem;
+        color: #9691a8;
+        margin-top: 0.35rem;
+        font-weight: 600;
+    }
 
-        .col-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 14px;
-        }
-        .col-badge {
-            font-family: 'Quicksand', sans-serif;
-            font-weight: 700;
-            font-size: 0.95rem;
-            padding: 5px 14px;
-            border-radius: 20px;
-            color: white;
-        }
-        .badge-will-do { background: linear-gradient(120deg, #a3a8d6, #8f94c9); }
-        .badge-doing   { background: linear-gradient(120deg, #7fb8e0, #5f9fd6); }
-        .badge-done    { background: linear-gradient(120deg, #7fd6a0, #5fc78a); }
+    /* ---------- Navigation Buttons ---------- */
+    div.stButton > button {
+        background-color: #ffffff;
+        color: #5c5570;
+        border: 1px solid #e0c7e8;
+        border-radius: 14px;
+        font-family: 'Quicksand', sans-serif;
+        font-weight: 700;
+        font-size: 0.95rem;
+        transition: all 0.25s ease;
+        width: 100%;
+        padding: 0.55rem 0.5rem;
+    }
+    div.stButton > button:hover {
+        border-color: #a78bd4;
+        color: #a78bd4;
+        box-shadow: 0 4px 12px rgba(150, 130, 180, 0.15);
+        transform: translateY(-1px);
+    }
+    div.stButton > button:active {
+        background-color: #f6f2fb;
+    }
 
-        .col-count {
-            background: #f1eef7;
-            color: #6b6386;
-            font-size: 0.78rem;
-            font-weight: 600;
-            padding: 2px 10px;
-            border-radius: 12px;
-        }
+    /* ---------- Section labels ---------- */
+    .section-label {
+        font-family: 'Quicksand', sans-serif;
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #6b6483;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        margin: 2rem 0 0.8rem 0;
+        text-align: center;
+    }
 
-        .task-card {
-            background: #ffffff;
-            border-radius: 14px;
-            padding: 14px 16px 10px 16px;
-            margin-bottom: 12px;
-            box-shadow: 0 3px 10px rgba(120, 100, 160, 0.10);
-            border: 1px solid #f0ecf7;
-            transition: transform 0.15s ease;
-        }
-        .task-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(120, 100, 160, 0.18);
-        }
-        .task-title {
-            font-size: 0.95rem;
-            color: #3a2e52;
-            font-weight: 500;
-            margin-bottom: 2px;
-            word-wrap: break-word;
-        }
-        .task-title.done-title {
-            text-decoration: line-through;
-            color: #9c94b3;
-        }
-        .task-meta {
-            font-size: 0.7rem;
-            color: #b1a9c4;
-        }
+    /* ---------- Countdown cards ---------- */
+    .countdown-row {
+        display: flex;
+        gap: 0.9rem;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .countdown-card {
+        flex: 1;
+        min-width: 200px;
+        background: #ffffff;
+        border-radius: 20px;
+        padding: 1.4rem 1.2rem;
+        text-align: center;
+        box-shadow: 0 6px 20px rgba(150, 130, 180, 0.12);
+        border: 1px solid #f1ecf7;
+    }
+    .countdown-number {
+        font-family: 'Quicksand', sans-serif;
+        font-size: 2.6rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #e08fa0, #a78bd4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        line-height: 1.1;
+    }
+    .countdown-name {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #5c5570;
+        margin-top: 0.2rem;
+    }
+    .countdown-sub {
+        font-size: 0.78rem;
+        color: #aca6bd;
+        margin-top: 0.3rem;
+    }
+    .unofficial-pill {
+        display: inline-block;
+        margin-top: 0.55rem;
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: #b3762f;
+        background: #fdf0dd;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+    }
 
-        .empty-col {
-            text-align: center;
-            color: #c3bcd6;
-            font-size: 0.85rem;
-            padding: 18px 0;
-            font-style: italic;
-        }
-
-        div.stButton > button {
-            border-radius: 20px;
-            border: none;
-            font-size: 0.72rem;
-            padding: 2px 10px;
-            font-weight: 600;
-        }
-
-        .add-task-wrap {
-            background: #ffffff;
-            border-radius: 16px;
-            padding: 18px 20px;
-            margin-bottom: 24px;
-            box-shadow: 0 3px 10px rgba(120, 100, 160, 0.10);
-            border: 1px solid #f0ecf7;
-        }
+    /* ---------- Welcome message ---------- */
+    .welcome-card {
+        background: #ffffff;
+        border-radius: 20px;
+        padding: 1.6rem 1.5rem;
+        text-align: center;
+        box-shadow: 0 6px 20px rgba(150, 130, 180, 0.12);
+        border: 1px solid #f1ecf7;
+        position: relative;
+    }
+    .welcome-card .quote-mark {
+        font-size: 1.6rem;
+        color: #e0c7e8;
+        line-height: 0;
+    }
+    .welcome-card .msg {
+        font-size: 1.15rem;
+        font-weight: 600;
+        color: #5c5570;
+        margin-top: 0.4rem;
+        line-height: 1.5;
+    }
+    .welcome-footer {
+        text-align: center;
+        font-size: 0.75rem;
+        color: #bcb6cc;
+        margin-top: 0.7rem;
+    }
+    .source-footer {
+        text-align: center;
+        font-size: 0.72rem;
+        color: #c2bcd1;
+        margin-top: 1.4rem;
+    }
+    .source-footer a {
+        color: #a78bd4;
+        text-decoration: none;
+        font-weight: 600;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ----------------------------------------------------------------------
-# HERO / HEADER
-# ----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Greeting
+# ---------------------------------------------------------------------------
+today = date.today()
+hero_html = (
+    '<div class="hero">'
+    '<div class="emoji">🌷</div>'
+    '<p class="greeting">Good morning, Madam baby!</p>'
+    f'<p class="today">{today.strftime("%A, %d %B %Y")}</p>'
+    "</div>"
+)
+st.markdown(hero_html, unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Quick Navigation Buttons (Centered Side-by-Side)
+# ---------------------------------------------------------------------------
+_, btn_col1, btn_col2, _ = st.columns([0.4, 1.2, 1.2, 0.4])
+
+with btn_col1:
+    if st.button("⏱️ Focus Timer", use_container_width=True):
+        st.switch_page("pages/pomodoro.py")
+
+with btn_col2:
+    if st.button("📋 Task Board", use_container_width=True):
+        st.switch_page("pages/kaban.py")
+
+# ---------------------------------------------------------------------------
+# Countdowns
+# ---------------------------------------------------------------------------
+st.markdown('<div class="section-label">Countdown to IBPS</div>', unsafe_allow_html=True)
+
+card_parts = []
+for name, info in EXAM_DATES.items():
+    remaining = days_left(info["date"])
+    if remaining >= 0:
+        number_html = f'<div class="countdown-number">{remaining}</div>'
+        sub_html = '<div class="countdown-sub">days to go</div>'
+    else:
+        number_html = f'<div class="countdown-number">Day {abs(remaining)}</div>'
+        sub_html = '<div class="countdown-sub">since it started</div>'
+
+    pill_html = (
+        '<div class="unofficial-pill">⚠ estimated date</div>'
+        if not info.get("official", True)
+        else ""
+    )
+
+    card_parts.append(
+        '<div class="countdown-card">'
+        + number_html
+        + f'<div class="countdown-name">{name}</div>'
+        + sub_html
+        + f'<div class="countdown-sub">{info["date"].strftime("%d %b %Y")}</div>'
+        + pill_html
+        + "</div>"
+    )
+
+cards_html = '<div class="countdown-row">' + "".join(card_parts) + "</div>"
+st.markdown(cards_html, unsafe_allow_html=True)
+
 st.markdown(
-    """
-    <div class="kanban-hero">
-        <div class="kanban-cat">🐱✨</div>
-        <h1>kanban board °˖✧</h1>
-        <p>Discipline is the bridge between goals and accomplishment</p>
-    </div>
-    """,
+    '<div class="source-footer">Dates per the IBPS Calendar 2026-27 — tentative, '
+    'confirm on <a href="https://www.ibps.in/" target="_blank">ibps.in</a></div>',
     unsafe_allow_html=True,
 )
 
-# ----------------------------------------------------------------------
-# AUDIO TRIGGER (plays once, right after a task is marked Done)
-# ----------------------------------------------------------------------
-if st.session_state.get("play_audio"):
-    audio_path = Path(__file__).parent / "audio.ogg"  # looks inside pages/, next to this file
-    if audio_path.exists():
-        with open(audio_path, "rb") as f:
-            st.audio(f.read(), format="audio/ogg", autoplay=True)
-    else:
-        st.warning(
-            "🔇 Couldn't find `audio.ogg` next to kaban.py — add your sound file "
-            "to hear it play when a task is completed."
-        )
-    st.session_state.play_audio = False
+# ---------------------------------------------------------------------------
+# Cycling welcome message
+# ---------------------------------------------------------------------------
+st.markdown('<div class="section-label">A little cheer for you</div>', unsafe_allow_html=True)
 
-# ----------------------------------------------------------------------
-# ADD NEW TASK
-# ----------------------------------------------------------------------
-with st.container():
-    st.markdown('<div class="add-task-wrap">', unsafe_allow_html=True)
-    col_input, col_btn = st.columns([5, 1])
-    with col_input:
-        new_task = st.text_input(
-            "New task", placeholder="Add a new task…", label_visibility="collapsed"
-        )
-    with col_btn:
-        add_clicked = st.button("➕ Add", use_container_width=True)
-    if add_clicked and new_task.strip():
-        tasks_col.insert_one(
-            {
-                "title": new_task.strip(),
-                "status": "Will Do",
-                "created_at": datetime.utcnow(),
-                "finished_at": None,
-            }
-        )
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ----------------------------------------------------------------------
-# EXCEL EXPORT
-# ----------------------------------------------------------------------
-def build_excel_bytes():
-    records = list(tasks_col.find({}).sort("created_at", 1))
-    rows = []
-    for r in records:
-        rows.append(
-            {
-                "Task": r.get("title", ""),
-                "Status": r.get("status", ""),
-                "Added": r["created_at"].strftime("%Y-%m-%d %H:%M") if r.get("created_at") else "",
-                "Finished": r["finished_at"].strftime("%Y-%m-%d %H:%M") if r.get("finished_at") else "",
-            }
-        )
-    df = pd.DataFrame(rows, columns=["Task", "Status", "Added", "Finished"])
-
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Tasks")
-        sheet = writer.sheets["Tasks"]
-        # a little auto-width so columns aren't cramped
-        for col_cells in sheet.columns:
-            length = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells)
-            sheet.column_dimensions[col_cells[0].column_letter].width = max(12, length + 2)
-    buffer.seek(0)
-    return buffer
-
-
-dl_col1, dl_col2 = st.columns([5, 1])
-with dl_col2:
-    st.download_button(
-        label="⬇️ Export Excel",
-        data=build_excel_bytes(),
-        file_name=f"tasks_{datetime.utcnow().strftime('%Y-%m-%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-
-st.markdown("<div style='margin-bottom: 18px;'></div>", unsafe_allow_html=True)
-
-# ----------------------------------------------------------------------
-# BOARD
-# ----------------------------------------------------------------------
-columns = st.columns(3)
-badge_class = {"Will Do": "badge-will-do", "Doing": "badge-doing", "Done": "badge-done"}
-
-for col, status in zip(columns, STATUSES):
-    with col:
-        tasks = list(tasks_col.find({"status": status}).sort("created_at", 1))
-        st.markdown(
-            f"""
-            <div class="col-header">
-                <span class="col-badge {badge_class[status]}">{status}</span>
-                <span class="col-count">{len(tasks)}</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        if not tasks:
-            st.markdown('<div class="empty-col">No tasks here yet</div>', unsafe_allow_html=True)
-
-        for task in tasks:
-            task_id = str(task["_id"])
-            title_class = "task-title done-title" if status == "Done" else "task-title"
-            check = "✅" if status == "Done" else "⬜"
-            st.markdown(
-                f"""
-                <div class="task-card">
-                    <div class="{title_class}">{check} {task['title']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            btn_cols = st.columns([1, 1, 1])
-            with btn_cols[0]:
-                if status in PREV_STATUS:
-                    if st.button("←", key=f"prev_{task_id}"):
-                        update = {"status": PREV_STATUS[status]}
-                        if status == "Done":
-                            update["finished_at"] = None  # un-completing clears the finish time
-                        tasks_col.update_one({"_id": task["_id"]}, {"$set": update})
-                        st.rerun()
-            with btn_cols[1]:
-                if status in NEXT_STATUS:
-                    if st.button("→", key=f"next_{task_id}"):
-                        target = NEXT_STATUS[status]
-                        update = {"status": target}
-                        if target == "Done":
-                            update["finished_at"] = datetime.utcnow()
-                        tasks_col.update_one({"_id": task["_id"]}, {"$set": update})
-                        if target == "Done":
-                            st.session_state.play_audio = True
-                        st.rerun()
-            with btn_cols[2]:
-                if st.button("🗑", key=f"del_{task_id}"):
-                    tasks_col.delete_one({"_id": task["_id"]})
-                    st.rerun()
+idx = int(datetime.now().timestamp() // CYCLE_SECONDS) % len(WELCOME_MESSAGES)
+welcome_html = (
+    '<div class="welcome-card">'
+    '<div class="quote-mark">❝</div>'
+    f'<div class="msg">{WELCOME_MESSAGES[idx]}</div>'
+    "</div>"
+    f'<div class="welcome-footer">message {idx + 1} of {len(WELCOME_MESSAGES)} · refreshes every 2 hours</div>'
+)
+st.markdown(welcome_html, unsafe_allow_html=True)
